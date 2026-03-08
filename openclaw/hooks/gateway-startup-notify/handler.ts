@@ -24,7 +24,7 @@ export interface VersionInfo {
 }
 
 // ============================================
-// Helper Functions (Pure - Easy to Test)
+// Helper Functions
 // ============================================
 
 /**
@@ -100,7 +100,6 @@ export function getCurrentTimeAEDT(): string {
 
 /**
  * Build the gateway startup notification message
- * Pure function - no side effects, easy to test
  */
 export function buildGatewayMessage(
   status: string,
@@ -120,7 +119,7 @@ ${sessionsStr}`;
 }
 
 // ============================================
-// Data Fetching Functions (Need Mock for Testing)
+// Data Fetching Functions
 // ============================================
 
 /**
@@ -222,7 +221,7 @@ const handler = async (event: any) => {
 
     console.log("[gateway-startup-notify] Sending notifications to Telegram and WhatsApp...");
 
-    // Send messages (not mocked in handler - mocked in tests via module mocking)
+    // Send messages
     await Promise.all([
       execAsync(`${OC} message send --channel telegram --target ${telegramTarget} -m "${escapedMsg}"`),
       execAsync(`${OC} message send --channel whatsapp --target ${whatsappTarget} -m "${escapedMsg}"`)
