@@ -2,6 +2,17 @@
 
 我的 OpenClaw 个人配置和扩展。
 
+## 🧪 测试
+
+运行测试：
+
+```bash
+cd test/hooks/gateway-startup-notify
+node test-handler.js
+```
+
+测试会 mock 所有外部命令，验证 hook 的输出格式。
+
 ## 📁 目录结构
 
 ```
