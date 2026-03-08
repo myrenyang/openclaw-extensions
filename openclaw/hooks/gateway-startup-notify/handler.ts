@@ -23,6 +23,13 @@ export interface VersionInfo {
   time: string;
 }
 
+export interface ChannelConfig {
+  name: string;
+  enabled: boolean;
+  target?: string;
+  allowFrom?: string[];
+}
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -180,6 +187,39 @@ export async function getOpenClawPath(): Promise<{ OC: string; OC_HOME: string }
   return { OC, OC_HOME };
 }
 
+/**
+ * Get all enabled channels from config
+ * Returns array of { name, target } for each enabled channel
+ */
+export async function getEnabledChannels(OC: string): Promise<ChannelConfig[]> {
+  const { stdout: channelsJsonRaw } = await execAsync(`${OC} config get channels 2>&1`);
+  const channelsData = JSON.parse(channelsJsonRaw);
+
+  const enabledChannels: ChannelConfig[] = [];
+
+  for (const [channelName, channelConfig] of Object.entries(channelsData)) {
+    const config = channelConfig as any;
+    if (config.enabled === true) {
+      // Extract target from allowFrom[0] or defaultTo
+      let target: string | undefined;
+      if (config.defaultTo) {
+        target = config.defaultTo;
+      } else if (config.allowFrom && config.allowFrom.length > 0) {
+        target = config.allowFrom[0];
+      }
+
+      enabledChannels.push({
+        name: channelName,
+        enabled: true,
+        target,
+        allowFrom: config.allowFrom || []
+      });
+    }
+  }
+
+  return enabledChannels;
+}
+
 // ============================================
 // Handler (Entry Point)
 // ============================================
@@ -211,21 +251,24 @@ const handler = async (event: any) => {
     // Escape message for shell
     const escapedMsg = msg.replace(/"/g, '\\"');
 
-    // Get targets from environment variables (required)
-    const telegramTarget = process.env.GATEWAY_NOTIFY_TELEGRAM;
-    const whatsappTarget = process.env.GATEWAY_NOTIFY_WHATSAPP;
+    // Get enabled channels dynamically from config
+    const enabledChannels = await getEnabledChannels(OC);
 
-    if (!telegramTarget || !whatsappTarget) {
-      throw new Error("Missing required environment variables: GATEWAY_NOTIFY_TELEGRAM and GATEWAY_NOTIFY_WHATSAPP");
+    if (enabledChannels.length === 0) {
+      throw new Error("No enabled channels found in config");
     }
 
-    console.log("[gateway-startup-notify] Sending notifications to Telegram and WhatsApp...");
+    console.log(`[gateway-startup-notify] Sending notifications to ${enabledChannels.length} channel(s): ${enabledChannels.map(c => c.name).join(', ')}...`);
 
-    // Send messages
-    await Promise.all([
-      execAsync(`${OC} message send --channel telegram --target ${telegramTarget} -m "${escapedMsg}"`),
-      execAsync(`${OC} message send --channel whatsapp --target ${whatsappTarget} -m "${escapedMsg}"`)
-    ]);
+    // Send messages to all enabled channels
+    const sendPromises = enabledChannels.map(channel => {
+      if (!channel.target) {
+        throw new Error(`No target found for channel: ${channel.name}`);
+      }
+      return execAsync(`${OC} message send --channel ${channel.name} --target ${channel.target} -m "${escapedMsg}"`);
+    });
+
+    await Promise.all(sendPromises);
 
     console.log("[gateway-startup-notify] Notifications sent successfully!");
   } catch (err) {

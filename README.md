@@ -28,13 +28,15 @@ openclaw-extensions/
 
 ### gateway-startup-notify
 
-Gateway 启动时发送通知到 Telegram 和 WhatsApp。
+Gateway 启动时发送通知到所有启用的频道。
 
 **功能：**
 - 显示版本号、build hash、build 时间
 - 显示运行状态
 - 列出最近的 sessions
-- 同时发送到 Telegram 和 WhatsApp
+- **动态获取频道**：自动从 `openclaw config get channels` 读取所有 `enabled: true` 的频道
+- **自动提取 target**：优先使用 `defaultTo`，否则使用 `allowFrom[0]` 作为发送目标
+- 同时发送到所有启用的频道（Telegram、WhatsApp 等）
 
 **安装：**
 ```bash
@@ -42,15 +44,26 @@ cp -r openclaw/hooks/gateway-startup-notify ~/.openclaw/hooks/
 openclaw hooks enable gateway-startup-notify
 ```
 
-**配置环境变量（必需）：**
-```bash
-# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
-export GATEWAY_NOTIFY_TELEGRAM="<your-telegram-id>"
-export GATEWAY_NOTIFY_WHATSAPP="<your-whatsapp-number>"
+**配置：**
+无需环境变量！Hook 会自动从 OpenClaw 配置文件中读取启用的频道和目标。
 
-# Example:
-# export GATEWAY_NOTIFY_TELEGRAM="REDACTED_TELEGRAM"
-# export GATEWAY_NOTIFY_WHATSAPP="REDACTED_WHATSAPP"
+只需在 `~/.openclaw/openclaw.json` 中配置频道：
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "defaultTo": "<your-whatsapp-number>"
+    },
+    "telegram": {
+      "enabled": true,
+      "allowFrom": ["<your-telegram-id>"]
+    },
+    "discord": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 **重启 gateway：**
