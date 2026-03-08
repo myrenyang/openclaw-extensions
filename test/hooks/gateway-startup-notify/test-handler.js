@@ -1,199 +1,274 @@
 /**
- * Test script for gateway-startup-notify hook
+ * Test suite for gateway-startup-notify hook
  *
- * This script:
- * 1. Mocks all shell command responses
- * 2. Simulates the handler logic
- * 3. Verifies the msg output format
- * 4. Does NOT actually send messages
+ * Tests:
+ * 1. getGatewayStatus - mock exec, verify status parsing
+ * 2. getVersionInfo - mock exec, verify version parsing
+ * 3. getSessions - mock exec, verify sessions parsing
+ * 4. buildGatewayMessage - pure function, verify message format
+ * 5. Helper functions - formatTokens, calcPercentage, etc.
  *
  * Run with: node test-handler.js
  */
 
-const { execSync } = require('child_process');
-const path = require('path');
+// ============================================
+// Setup: Mock child_process BEFORE importing handler
+// ============================================
 
-// Mock responses
-const mockResponses = {
-  'which openclaw': '/usr/local/bin/openclaw',
-  'gateway status': `Runtime: running (pid 12345, state active)`,
-  'build-info.json': JSON.stringify({
+const mockResponses = {};
+let capturedExecCalls = [];
+
+// Mock exec function
+function mockExec(command) {
+  return new Promise((resolve, reject) => {
+    capturedExecCalls.push(command);
+    const response = mockResponses[command] || mockResponses[Object.keys(mockResponses).find(k => command.includes(k))];
+    if (response !== undefined) {
+      resolve({ stdout: response, stderr: '' });
+    } else {
+      resolve({ stdout: '', stderr: '' });
+    }
+  });
+}
+
+// Override Module.prototype.require to intercept child_process
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+
+Module.prototype.require = function(id) {
+  const module = originalRequire.apply(this, arguments);
+
+  if (id === 'child_process') {
+    return { exec: mockExec };
+  }
+  if (id === 'util') {
+    return {
+      promisify: (fn) => fn  // Return function as-is for mock
+    };
+  }
+  return module;
+};
+
+// Import the compiled handler (from TypeScript)
+const handler = require('./dist/handler.js');
+const {
+  formatTokens,
+  calcPercentage,
+  formatBuildTime,
+  formatSessionAge,
+  formatSessionInfo,
+  getCurrentTimeAEDT,
+  buildGatewayMessage,
+  getGatewayStatus,
+  getVersionInfo,
+  getSessions
+} = handler;
+
+// ============================================
+// Test Utilities
+// ============================================
+
+let passedTests = 0;
+let failedTests = 0;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`  ✅ ${message}`);
+    passedTests++;
+  } else {
+    console.log(`  ❌ ${message}`);
+    failedTests++;
+  }
+}
+
+function resetMocks() {
+  mockResponses.length = 0;
+  capturedExecCalls = [];
+}
+
+// ============================================
+// Test: Helper Functions (Pure Functions)
+// ============================================
+
+function testHelperFunctions() {
+  console.log('\n📋 Test: Helper Functions (Pure)');
+  console.log('=' .repeat(50));
+
+  // formatTokens
+  assert(formatTokens(50000) === '50k', 'formatTokens(50000) === "50k"');
+  assert(formatTokens(1000) === '1k', 'formatTokens(1000) === "1k"');
+  assert(formatTokens(0) === '0k', 'formatTokens(0) === "0k"');
+  assert(formatTokens(null) === '0k', 'formatTokens(null) === "0k"');
+
+  // calcPercentage
+  assert(calcPercentage(50000, 100000) === '50%', 'calcPercentage(50000, 100000) === "50%"');
+  assert(calcPercentage(25000, 100000) === '25%', 'calcPercentage(25000, 100000) === "25%"');
+  assert(calcPercentage(0, 100000) === '0%', 'calcPercentage(0, 100000) === "0%"');
+  assert(calcPercentage(null, 100000) === '0%', 'calcPercentage(null, 100000) === "0%"');
+
+  // formatBuildTime (check format, not exact value due to timezone)
+  const buildTimeResult = formatBuildTime('2026-03-08T08:00:00.000Z');
+  // Format: yy.M.dThh:mm or yy.MM.ddThh:mm (timezone dependent)
+  assert(buildTimeResult.match(/^\d{2}\.\d{1,2}\.\d{1,2}T\d{2}:\d{2}$/), 'formatBuildTime returns correct format (yy.M.dThh:mm)');
+
+  // formatSessionAge
+  assert(formatSessionAge(300000) === '5m', 'formatSessionAge(300000) === "5m"');
+  assert(formatSessionAge(7200000) === '2h', 'formatSessionAge(7200000) === "2h"');
+  assert(formatSessionAge(86400000) === '1d', 'formatSessionAge(86400000) === "1d"');
+
+  // formatSessionInfo
+  const mockSession = {
+    key: 'agent:main:main',
+    kind: 'direct',
+    model: 'qwen3.5-plus',
+    ageMs: 300000,
+    totalTokens: 50000,
+    contextTokens: 100000
+  };
+  const sessionStr = formatSessionInfo(mockSession);
+  assert(sessionStr.includes('5m'), 'formatSessionInfo includes age');
+  assert(sessionStr.includes('50k'), 'formatSessionInfo includes tokens');
+  assert(sessionStr.includes('50%'), 'formatSessionInfo includes percentage');
+
+  // getCurrentTimeAEDT
+  const timeStr = getCurrentTimeAEDT();
+  assert(timeStr.includes('AEDT'), 'getCurrentTimeAEDT includes timezone');
+  assert(timeStr.length > 10, 'getCurrentTimeAEDT returns non-empty string');
+}
+
+// ============================================
+// Test: buildGatewayMessage (Pure Function)
+// ============================================
+
+function testBuildGatewayMessage() {
+  console.log('\n📋 Test: buildGatewayMessage (Pure)');
+  console.log('=' .repeat(50));
+
+  const mockSessions = [
+    { key: 'agent:main:main', kind: 'direct', model: 'qwen3.5-plus', ageMs: 300000, totalTokens: 50000, contextTokens: 100000 },
+    { key: 'agent:main:telegram', kind: 'group', model: 'qwen3.5-plus', ageMs: 7200000, totalTokens: 20000, contextTokens: 100000 }
+  ];
+
+  const msg = buildGatewayMessage('running (pid 12345)', '2026.3.2 (85377a2)', mockSessions);
+
+  // Verify message structure
+  assert(msg.includes('🔄'), 'Message includes gateway emoji');
+  assert(msg.includes('Gateway 已启动于'), 'Message includes startup header');
+  assert(msg.includes('版本：v2026.3.2'), 'Message includes version');
+  assert(msg.includes('85377a2'), 'Message includes build hash');
+  assert(msg.includes('状态：running'), 'Message includes status');
+  assert(msg.includes('会话：2 个'), 'Message includes session count');
+  assert(msg.includes('5m ago'), 'Message includes session age');
+  assert(msg.includes('50k'), 'Message includes token count');
+  assert(msg.includes('AEDT'), 'Message includes timezone');
+}
+
+// ============================================
+// Test: getGatewayStatus (Async with Mock)
+// ============================================
+
+async function testGetGatewayStatus() {
+  console.log('\n📋 Test: getGatewayStatus (Async with Mock)');
+  console.log('=' .repeat(50));
+
+  resetMocks();
+
+  // Mock the gateway status command
+  mockResponses['gateway status'] = 'Runtime: running (pid 12345, state active, sub running)';
+
+  const status = await getGatewayStatus('/usr/local/bin/openclaw');
+
+  assert(status === 'running (pid 12345, state active, sub running)', 'getGatewayStatus returns correct status');
+  assert(capturedExecCalls.some(c => c.includes('gateway status')), 'getGatewayStatus calls gateway status command');
+}
+
+// ============================================
+// Test: getVersionInfo (Async with Mock)
+// ============================================
+
+async function testGetVersionInfo() {
+  console.log('\n📋 Test: getVersionInfo (Async with Mock)');
+  console.log('=' .repeat(50));
+
+  resetMocks();
+
+  // Mock build-info.json response (match the exact command pattern)
+  const mockBuildInfo = {
     version: '2026.3.2',
-    commit: '85377a2',
+    commit: '85377a2f085f93fa08e96a712ae893155fce634',
     builtAt: '2026-03-08T08:00:00.000Z'
-  }),
-  'sessions --json': JSON.stringify({
+  };
+  mockResponses['cat'] = JSON.stringify(mockBuildInfo);
+
+  const versionInfo = await getVersionInfo('/usr/local/bin/openclaw', '/usr/local');
+
+  assert(versionInfo.version === '2026.3.2', 'getVersionInfo returns correct version');
+  assert(versionInfo.hash === '85377a2', 'getVersionInfo returns correct hash');
+  // Time format may vary due to timezone, just check it's non-empty
+  assert(versionInfo.time.length > 0, 'getVersionInfo returns non-empty time');
+}
+
+// ============================================
+// Test: getSessions (Async with Mock)
+// ============================================
+
+async function testGetSessions() {
+  console.log('\n📋 Test: getSessions (Async with Mock)');
+  console.log('=' .repeat(50));
+
+  resetMocks();
+
+  // Mock sessions response
+  mockResponses['sessions --json'] = JSON.stringify({
     count: 3,
     sessions: [
       { key: 'agent:main:main', kind: 'direct', model: 'qwen3.5-plus', ageMs: 300000, totalTokens: 50000, contextTokens: 100000 },
       { key: 'agent:main:telegram', kind: 'group', model: 'qwen3.5-plus', ageMs: 7200000, totalTokens: 20000, contextTokens: 100000 }
     ]
-  })
-};
+  });
 
-// Mock exec function
-function mockExec(cmd) {
-  console.log(`[MOCK EXEC] ${cmd}`);
-  for (const [pattern, response] of Object.entries(mockResponses)) {
-    if (cmd.includes(pattern)) {
-      console.log(`  → Mocked: ${pattern}`);
-      return response;
-    }
+  const sessions = await getSessions('/usr/local/bin/openclaw');
+
+  assert(sessions.length === 2, 'getSessions returns correct number of sessions');
+  assert(sessions[0].key === 'agent:main:main', 'getSessions returns correct session key');
+  assert(sessions[0].model === 'qwen3.5-plus', 'getSessions returns correct model');
+}
+
+// ============================================
+// Main Test Runner
+// ============================================
+
+async function runAllTests() {
+  console.log('='.repeat(60));
+  console.log('Gateway Startup Notify Hook - Test Suite');
+  console.log('='.repeat(60));
+
+  // Run all tests
+  testHelperFunctions();
+  testBuildGatewayMessage();
+  await testGetGatewayStatus();
+  await testGetVersionInfo();
+  await testGetSessions();
+
+  // Summary
+  console.log('\n' + '='.repeat(60));
+  console.log('Summary');
+  console.log('='.repeat(60));
+  console.log(`Total: ${passedTests + failedTests} tests`);
+  console.log(`✅ Passed: ${passedTests}`);
+  console.log(`❌ Failed: ${failedTests}`);
+
+  if (failedTests === 0) {
+    console.log('\n🎉 All tests PASSED!');
+    process.exit(0);
+  } else {
+    console.log('\n❌ Some tests FAILED');
+    process.exit(1);
   }
-  return '';
 }
 
-// Format helpers (from handler.ts)
-function formatTokens(tokens) {
-  if (!tokens) return '0k';
-  return Math.round(tokens / 1000) + 'k';
-}
-
-function calcPercentage(total, context) {
-  if (!total || !context || context === 0) return '0%';
-  return Math.round((total / context) * 100) + '%';
-}
-
-function formatBuildTime(isoString) {
-  const d = new Date(isoString);
-  const yy = String(d.getFullYear()).slice(-2);
-  const MM = String(d.getMonth() + 1);
-  const dd = String(d.getDate());
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${yy}.${MM}.${dd}T${hh}:${mm}`;
-}
-
-// Simulate handler logic
-function simulateHandler() {
-  console.log('[TEST] Simulating gateway-startup-notify handler...\n');
-
-  // Mock environment
-  process.env.GATEWAY_NOTIFY_TELEGRAM = 'mock-telegram-id';
-  process.env.GATEWAY_NOTIFY_WHATSAPP = 'mock-whatsapp-number';
-
-  // Simulate OC_HOME detection
-  const OC = mockExec('which openclaw');
-  const ocDir = path.dirname(OC);
-  const OC_HOME = ocDir.endsWith('/bin') ? path.dirname(ocDir) : ocDir;
-  console.log(`[TEST] OC_HOME: ${OC_HOME}\n`);
-
-  // Get status
-  const statusRaw = mockExec('gateway status');
-  const status = statusRaw.replace('Runtime: ', '').trim();
-
-  // Get version info
-  let version = '2026.3.2';
-  let buildHash = '85377a2';
-  let buildTime = '26.03.08T08:00';
-
-  // Get sessions
-  const sessionsData = JSON.parse(mockExec('sessions --json'));
-  const sessionCount = sessionsData.count;
-  const sessions = sessionsData.sessions.slice(0, 5).map(s => {
-    const ageMin = Math.round(s.ageMs / 60000);
-    const ageStr = ageMin < 60 ? `${ageMin}m` : ageMin < 1440 ? `${Math.round(ageMin / 60)}h` : `${Math.round(ageMin / 1440)}d`;
-    const tokens = formatTokens(s.totalTokens);
-    const pct = calcPercentage(s.totalTokens, s.contextTokens);
-    return `• ${ageStr} ago ${s.kind} ${s.key} ${s.model} ${tokens} ${pct}`;
-  }).join('\n');
-
-  // Format startup time
-  const startupTime = new Date().toLocaleString('en-CA', {
-    timeZone: 'Australia/Sydney',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  }).replace(',', '') + ' AEDT';
-
-  // Build message (this is what the handler would send)
-  const msg = `🔄 Gateway 已启动于 ${startupTime}
-
-版本：v${version} (${buildHash}) at ${buildTime}
-状态：${status}
-会话：${sessionCount} 个，最近:
-${sessions}`;
-
-  return msg;
-}
-
-// Run test
-console.log('='.repeat(60));
-console.log('Gateway Startup Notify Hook - Test');
-console.log('='.repeat(60));
-console.log();
-
-const capturedMessage = simulateHandler();
-
-console.log();
-console.log('='.repeat(60));
-console.log('Test Results');
-console.log('='.repeat(60));
-console.log();
-
-// Test 1: Message generated
-console.log('Test 1: Message Generation');
-if (capturedMessage) {
-  console.log('  ✅ PASSED: Message generated successfully');
-} else {
-  console.log('  ❌ FAILED: No message generated');
-}
-console.log();
-
-// Test 2: Message format validation
-console.log('Test 2: Message Format Validation');
-const checks = [
-  { name: 'Contains gateway emoji (🔄)', test: () => capturedMessage.includes('🔄') },
-  { name: 'Contains version info', test: () => capturedMessage.includes('v2026') || capturedMessage.includes('2026.3') },
-  { name: 'Contains build hash', test: () => capturedMessage.includes('85377a2') },
-  { name: 'Contains startup time', test: () => capturedMessage.includes('启动于') },
-  { name: 'Contains status', test: () => capturedMessage.includes('状态') || capturedMessage.includes('running') },
-  { name: 'Contains session count', test: () => capturedMessage.includes('会话') },
-  { name: 'Contains session list', test: () => capturedMessage.includes('•') }
-];
-
-let allPassed = true;
-checks.forEach(check => {
-  const passed = check.test();
-  if (!passed) allPassed = false;
-  console.log(`  ${passed ? '✅' : '❌'} ${check.name}`);
+// Run tests
+runAllTests().catch(err => {
+  console.error('Fatal error:', err);
+  process.exit(1);
 });
-console.log();
-
-// Test 3: Environment variables
-console.log('Test 3: Environment Variables');
-const telegramSet = !!process.env.GATEWAY_NOTIFY_TELEGRAM;
-const whatsappSet = !!process.env.GATEWAY_NOTIFY_WHATSAPP;
-console.log(`  ${telegramSet ? '✅' : '❌'} GATEWAY_NOTIFY_TELEGRAM is set`);
-console.log(`  ${whatsappSet ? '✅' : '❌'} GATEWAY_NOTIFY_WHATSAPP is set`);
-console.log();
-
-// Test 4: No actual message sent
-console.log('Test 4: Message Not Actually Sent');
-console.log('  ✅ PASSED: Messages are mocked (not sent to Telegram/WhatsApp)');
-console.log();
-
-// Summary
-console.log('='.repeat(60));
-console.log('Summary');
-console.log('='.repeat(60));
-if (allPassed && capturedMessage) {
-  console.log('✅ All tests PASSED');
-} else {
-  console.log('❌ Some tests FAILED');
-}
-console.log();
-
-// Show captured message
-console.log('📝 Captured Message:');
-console.log('-'.repeat(60));
-console.log(capturedMessage);
-console.log('-'.repeat(60));
-console.log();
-
-// Exit
-process.exit(allPassed && capturedMessage ? 0 : 1);

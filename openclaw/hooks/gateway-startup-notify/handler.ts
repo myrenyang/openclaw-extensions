@@ -4,22 +4,51 @@ import * as path from "path";
 
 const execAsync = promisify(exec);
 
-// Format tokens to k (thousands)
-function formatTokens(tokens: number | null): string {
+// ============================================
+// Types
+// ============================================
+
+export interface SessionInfo {
+  key: string;
+  kind: string;
+  model: string;
+  ageMs: number;
+  totalTokens: number;
+  contextTokens: number;
+}
+
+export interface VersionInfo {
+  version: string;
+  hash: string;
+  time: string;
+}
+
+// ============================================
+// Helper Functions (Pure - Easy to Test)
+// ============================================
+
+/**
+ * Format tokens to k (thousands)
+ */
+export function formatTokens(tokens: number | null): string {
   if (tokens === null || tokens === undefined) return '0k';
   const k = Math.round(tokens / 1000);
   return k + 'k';
 }
 
-// Calculate percentage
-function calcPercentage(total: number | null, context: number | null): string {
+/**
+ * Calculate percentage
+ */
+export function calcPercentage(total: number | null, context: number | null): string {
   if (!total || !context || context === 0) return '0%';
   const pct = Math.round((total / context) * 100);
   return pct + '%';
 }
 
-// Format build time to yyMMddThh:mm
-function formatBuildTime(isoString: string): string {
+/**
+ * Format build time to yyMMddThh:mm
+ */
+export function formatBuildTime(isoString: string): string {
   const d = new Date(isoString);
   const yy = String(d.getFullYear()).slice(-2);
   const MM = String(d.getMonth() + 1);
@@ -28,6 +57,133 @@ function formatBuildTime(isoString: string): string {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${yy}.${MM}.${dd}T${hh}:${mm}`;
 }
+
+/**
+ * Format session age to human readable string
+ */
+export function formatSessionAge(ageMs: number): string {
+  const ageMin = Math.round(ageMs / 60000);
+  if (ageMin < 60) {
+    return `${ageMin}m`;
+  } else if (ageMin < 1440) {
+    return `${Math.round(ageMin / 60)}h`;
+  } else {
+    return `${Math.round(ageMin / 1440)}d`;
+  }
+}
+
+/**
+ * Format session info to display string
+ */
+export function formatSessionInfo(s: SessionInfo): string {
+  const ageStr = formatSessionAge(s.ageMs);
+  const tokens = formatTokens(s.totalTokens);
+  const pct = calcPercentage(s.totalTokens, s.contextTokens);
+  return `• ${ageStr} ago ${s.kind} ${s.key} ${s.model} ${tokens} ${pct}`;
+}
+
+/**
+ * Get current time formatted for Australia/Sydney timezone
+ */
+export function getCurrentTimeAEDT(): string {
+  return new Date().toLocaleString('en-CA', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).replace(',', '') + ' AEDT';
+}
+
+/**
+ * Build the gateway startup notification message
+ * Pure function - no side effects, easy to test
+ */
+export function buildGatewayMessage(
+  status: string,
+  versionFullStr: string,
+  sessions: SessionInfo[]
+): string {
+  const startupTime = getCurrentTimeAEDT();
+  const sessionCount = sessions.length;
+  const sessionsStr = sessions.slice(0, 5).map(formatSessionInfo).join('\n');
+
+  return `🔄 Gateway 已启动于 ${startupTime}
+
+版本：v${versionFullStr}
+状态：${status}
+会话：${sessionCount} 个，最近:
+${sessionsStr}`;
+}
+
+// ============================================
+// Data Fetching Functions (Need Mock for Testing)
+// ============================================
+
+/**
+ * Get gateway status from CLI
+ */
+export async function getGatewayStatus(OC: string): Promise<string> {
+  const { stdout: statusRaw } = await execAsync(`${OC} gateway status 2>&1 | grep 'Runtime:' | head -1`);
+  return statusRaw.trim().replace('Runtime: ', '');
+}
+
+/**
+ * Get version info from build-info.json or fallback to --version
+ */
+export async function getVersionInfo(OC: string, OC_HOME: string): Promise<VersionInfo> {
+  try {
+    const buildInfoPath = path.join(OC_HOME, "lib/node_modules/openclaw/dist/build-info.json");
+    const { stdout: buildInfoRaw } = await execAsync(`cat "${buildInfoPath}" 2>/dev/null`);
+    const buildInfo = JSON.parse(buildInfoRaw);
+
+    if (buildInfo.version) {
+      return {
+        version: buildInfo.version,
+        hash: buildInfo.commit ? buildInfo.commit.substring(0, 7) : '',
+        time: buildInfo.builtAt ? formatBuildTime(buildInfo.builtAt) : ''
+      };
+    }
+  } catch (e) {
+    // Fallback to --version
+    try {
+      const { stdout: versionRaw } = await execAsync(`${OC} --version 2>&1`);
+      const version = versionRaw.trim() || 'unknown';
+      return { version, hash: '', time: '' };
+    } catch (e2) {
+      console.log("[gateway-startup-notify] version lookup failed");
+    }
+  }
+
+  return { version: 'unknown', hash: '', time: '' };
+}
+
+/**
+ * Get sessions list from CLI
+ */
+export async function getSessions(OC: string): Promise<SessionInfo[]> {
+  const { stdout: sessionsJsonRaw } = await execAsync(`${OC} sessions --json --all-agents 2>&1`);
+  const sessionsData = JSON.parse(sessionsJsonRaw);
+  return sessionsData.sessions || [];
+}
+
+/**
+ * Get OpenClaw binary path
+ */
+export async function getOpenClawPath(): Promise<{ OC: string; OC_HOME: string }> {
+  const { stdout: ocPathRaw } = await execAsync("which openclaw");
+  const OC = ocPathRaw.trim();
+  const ocDir = path.dirname(OC);
+  const OC_HOME = ocDir.endsWith("/bin") ? path.dirname(ocDir) : ocDir;
+  return { OC, OC_HOME };
+}
+
+// ============================================
+// Handler (Entry Point)
+// ============================================
 
 const handler = async (event: any) => {
   // Only trigger on gateway startup
@@ -38,90 +194,20 @@ const handler = async (event: any) => {
   console.log("[gateway-startup-notify] Gateway started, gathering status...");
 
   try {
-    // Get openclaw binary path using `which`
-    const { stdout: ocPathRaw } = await execAsync("which openclaw");
-    const OC = ocPathRaw.trim();
-
-    // Calculate OC_HOME: openclaw is at $OC_HOME/bin/openclaw
-    // Typically: ~/.npm-global/bin/openclaw -> OC_HOME = ~/.npm-global
-    const ocDir = path.dirname(OC);
-    const OC_HOME = ocDir.endsWith("/bin") ? path.dirname(ocDir) : ocDir;
-
+    // Get OpenClaw path
+    const { OC, OC_HOME } = await getOpenClawPath();
     console.log("[gateway-startup-notify] OC_HOME:", OC_HOME);
 
-    // Get gateway status
-    const { stdout: statusRaw } = await execAsync(`${OC} gateway status 2>&1 | grep 'Runtime:' | head -1`);
-    const status = statusRaw.trim().replace('Runtime: ', '');
+    // Fetch data
+    const status = await getGatewayStatus(OC);
+    const versionInfo = await getVersionInfo(OC, OC_HOME);
+    const sessions = await getSessions(OC);
 
-    // Get version, build hash and build time from build-info.json
-    let version = 'unknown';
-    let buildHash = '';
-    let buildTime = '';
+    // Build version string
+    const versionFullStr = versionInfo.hash ? `${versionInfo.version} (${versionInfo.hash})` : versionInfo.version;
 
-    try {
-      const buildInfoPath = path.join(OC_HOME, "lib/node_modules/openclaw/dist/build-info.json");
-      const { stdout: buildInfoRaw } = await execAsync(`cat "${buildInfoPath}" 2>/dev/null`);
-      const buildInfo = JSON.parse(buildInfoRaw);
-      if (buildInfo.version) {
-        version = buildInfo.version;
-        buildHash = buildInfo.commit ? buildInfo.commit.substring(0, 7) : '';
-        buildTime = buildInfo.builtAt ? formatBuildTime(buildInfo.builtAt) : '';
-      }
-    } catch (e) {
-      // Fallback to --version
-      try {
-        const { stdout: versionRaw } = await execAsync(`${OC} --version 2>&1`);
-        version = versionRaw.trim() || 'unknown';
-      } catch (e2) {
-        console.log("[gateway-startup-notify] version lookup failed");
-      }
-    }
-
-    const versionStr = buildHash ? `${version} (${buildHash})` : version;
-
-    // Get sessions as JSON
-    let sessionCount = 0;
-    let sessions = '';
-    try {
-      const { stdout: sessionsJsonRaw } = await execAsync(`${OC} sessions --json --all-agents 2>&1`);
-      const sessionsData = JSON.parse(sessionsJsonRaw);
-      sessionCount = sessionsData.count || 0;
-      sessions = (sessionsData.sessions || []).slice(0, 5).map((s: any) => {
-        const ageMin = Math.round(s.ageMs / 60000);
-        let ageStr: string;
-        if (ageMin < 60) {
-          ageStr = `${ageMin}m`;
-        } else if (ageMin < 1440) {
-          ageStr = `${Math.round(ageMin / 60)}h`;
-        } else {
-          ageStr = `${Math.round(ageMin / 1440)}d`;
-        }
-        const tokens = formatTokens(s.totalTokens);
-        const pct = calcPercentage(s.totalTokens, s.contextTokens);
-        return `• ${ageStr} ago ${s.kind} ${s.key} ${s.model} ${tokens} ${pct}`;
-      }).join('\n');
-    } catch (e) {
-      console.log("[gateway-startup-notify] sessions lookup failed");
-    }
-
-    // Format startup time as yyyy-MM-dd hh:mm:ss am/pm AEDT
-    const startupTime = new Date().toLocaleString('en-CA', {
-      timeZone: 'Australia/Sydney',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
-    }).replace(',', '') + ' AEDT';
-
-    const msg = `🔄 Gateway 已启动于 ${startupTime}
-
-版本：v${versionStr}${buildTime ? ' at ' + buildTime : ''}
-状态：${status}
-会话：${sessionCount} 个，最近:
-${sessions}`;
+    // Build message using pure function
+    const msg = buildGatewayMessage(status, versionFullStr, sessions);
 
     // Escape message for shell
     const escapedMsg = msg.replace(/"/g, '\\"');
@@ -136,6 +222,7 @@ ${sessions}`;
 
     console.log("[gateway-startup-notify] Sending notifications to Telegram and WhatsApp...");
 
+    // Send messages (not mocked in handler - mocked in tests via module mocking)
     await Promise.all([
       execAsync(`${OC} message send --channel telegram --target ${telegramTarget} -m "${escapedMsg}"`),
       execAsync(`${OC} message send --channel whatsapp --target ${whatsappTarget} -m "${escapedMsg}"`)
