@@ -13,13 +13,14 @@ openclaw-extensions/
 ├── test/                       # 测试代码
 │   └── hooks/
 │       └── gateway-startup-notify/
+│           ├── README.md       # 测试文档
 │           ├── dist/           # 编译后的 JS
 │           ├── mocks/          # Mock 数据
 │           ├── package.json    # 测试依赖
-│           ├── tsconfig.json   # TypeScript 配置
-│           └── test-handler.js # 测试脚本
+│           └── tsconfig.json   # TypeScript 配置
 ├── .gitignore
 ├── .pre-commit-config.yaml     # Pre-commit 配置
+├── SECURITY.md                 # 安全保护文档
 └── README.md
 ```
 
@@ -64,61 +65,12 @@ openclaw gateway restart
 3. 使用 `openclaw hooks enable <hook-name>` 启用
 4. 重启 gateway: `openclaw gateway restart`
 
----
-
-## 🧪 测试（开发用）
-
-### 前置条件
-
-安装测试依赖：
-```bash
-cd test/hooks/gateway-startup-notify
-npm install
-```
-
-### 编译 TypeScript
-
-测试前需要先编译 handler.ts：
-```bash
-npx tsc
-```
-
-这会生成 `dist/handler.js` 文件供测试使用。
-
-### 运行测试
-
-```bash
-node test-handler.js
-```
-
-测试会 mock 所有外部命令，验证：
-- 辅助函数（formatTokens, calcPercentage, formatBuildTime 等）
-- buildGatewayMessage 纯函数
-- 数据获取函数（getGatewayStatus, getVersionInfo, getSessions）
-
-**总计：45 个测试**
-
-### 测试模式
-
-```javascript
-// 1. Mock shell 命令返回值
-mockResponses['gateway status'] = 'Runtime: running...';
-
-// 2. 调用函数
-const status = await getGatewayStatus('/usr/local/bin/openclaw');
-
-// 3. 验证返回值
-assert(status === 'running...');
-```
-
----
-
 ## 📝 说明
 
 - 本仓库包含个人定制的 OpenClaw hooks 和配置
 - 所有 hooks 放在 `openclaw/hooks/` 目录下
 - 每个 hook 是一个独立的目录，包含 `handler.ts`
-- 测试代码放在 `test/hooks/` 目录下
+- 测试代码放在 `test/hooks/` 目录下，查看 [test/hooks/gateway-startup-notify/README.md](test/hooks/gateway-startup-notify/README.md)
 
 ## 🛡️ 安全
 
