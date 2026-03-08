@@ -1,0 +1,16 @@
+repos:
+  # 1. pre-commit-hooks - 基础检查
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key      # 私钥检测
+      - id: trailing-whitespace     # 尾部空格
+      - id: end-of-file-fixer       # 文件末尾换行
+
+  # 2. detect-secrets - 熵值分析检测高熵字符串
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: .*\.(png|jpg|jpeg|gif|svg|lock)$
