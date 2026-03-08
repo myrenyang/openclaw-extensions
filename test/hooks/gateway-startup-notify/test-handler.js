@@ -102,7 +102,8 @@ function testHelperFunctions() {
 
   // calcPercentage
   assert(calcPercentage(50000, 100000) === '50%', 'calcPercentage(50000, 100000) === "50%"');
-  assert(calcPercentage(25000, 100000) === '25%', 'calcPercentage(25000, 100000) === "25%"');
+  assert(calcPercentage(25499, 100000) === '25%', 'calcPercentage(25499, 100000) === "25%" (rounds down)');
+  assert(calcPercentage(25500, 100000) === '26%', 'calcPercentage(25500, 100000) === "26%" (rounds up)');
   assert(calcPercentage(0, 100000) === '0%', 'calcPercentage(0, 100000) === "0%"');
   assert(calcPercentage(null, 100000) === '0%', 'calcPercentage(null, 100000) === "0%"');
 
@@ -116,7 +117,7 @@ function testHelperFunctions() {
   assert(formatSessionAge(7200000) === '2h', 'formatSessionAge(7200000) === "2h"');
   assert(formatSessionAge(86400000) === '1d', 'formatSessionAge(86400000) === "1d"');
 
-  // formatSessionInfo
+  // formatSessionInfo - Test all fields
   const mockSession = {
     key: 'agent:main:main',
     kind: 'direct',
@@ -126,9 +127,36 @@ function testHelperFunctions() {
     contextTokens: 100000
   };
   const sessionStr = formatSessionInfo(mockSession);
-  assert(sessionStr.includes('5m'), 'formatSessionInfo includes age');
-  assert(sessionStr.includes('50k'), 'formatSessionInfo includes tokens');
-  assert(sessionStr.includes('50%'), 'formatSessionInfo includes percentage');
+
+  // Verify all fields are present
+  assert(sessionStr.includes('5m'), 'formatSessionInfo includes age (5m)');
+  assert(sessionStr.includes('ago'), 'formatSessionInfo includes "ago"');
+  assert(sessionStr.includes('direct'), 'formatSessionInfo includes kind (direct)');
+  assert(sessionStr.includes('agent:main:main'), 'formatSessionInfo includes key');
+  assert(sessionStr.includes('qwen3.5-plus'), 'formatSessionInfo includes model');
+  assert(sessionStr.includes('50k'), 'formatSessionInfo includes tokens (50k)');
+  assert(sessionStr.includes('50%'), 'formatSessionInfo includes percentage (50%)');
+  assert(sessionStr.startsWith('•'), 'formatSessionInfo starts with bullet point');
+
+  // Test different session kinds
+  const groupSession = { ...mockSession, kind: 'group', key: 'telegram:group:123' };
+  const groupStr = formatSessionInfo(groupSession);
+  assert(groupStr.includes('group'), 'formatSessionInfo handles group kind');
+  assert(groupStr.includes('telegram:group:123'), 'formatSessionInfo includes group key');
+
+  // Test different token counts
+  const largeTokenSession = { ...mockSession, totalTokens: 1500000 };
+  const largeTokenStr = formatSessionInfo(largeTokenSession);
+  assert(largeTokenStr.includes('1500k'), 'formatSessionInfo handles large token counts (1500k)');
+
+  // Test different ages
+  const hourSession = { ...mockSession, ageMs: 7200000 }; // 2 hours
+  const hourStr = formatSessionInfo(hourSession);
+  assert(hourStr.includes('2h'), 'formatSessionInfo handles hours (2h)');
+
+  const daySession = { ...mockSession, ageMs: 172800000 }; // 2 days
+  const dayStr = formatSessionInfo(daySession);
+  assert(dayStr.includes('2d'), 'formatSessionInfo handles days (2d)');
 
   // getCurrentTimeAEDT
   const timeStr = getCurrentTimeAEDT();
