@@ -32,16 +32,6 @@
 
 ---
 
-## 🚫 Pre-push Hooks
-
-在 push 前验证所有 commits 是否有签名。
-
-**~/.git-templates/hooks/pre-push:**
-- 检查每个待推送的 commit 是否有 SSH/GPG 签名
-- 阻止未签名的 commits 被推送
-
----
-
 ## 📋 敏感信息检测清单
 
 | 类型 | 检测方式 | 级别 |
