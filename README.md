@@ -57,27 +57,6 @@ export GATEWAY_NOTIFY_WHATSAPP="<your-whatsapp-number>"
 openclaw gateway restart
 ```
 
-## 🛡️ 安全保护
-
-本仓库配置了多层安全保护，防止敏感信息泄露：
-
-### Pre-commit Hooks
-- **detect-private-key** - 检测私钥
-- **trailing-whitespace** - 清理尾部空格
-- **end-of-file-fixer** - 修复文件末尾换行
-- **detect-secrets** - 熵值分析检测高熵字符串（API keys、密码等）
-
-### 自定义检查
-- 电话号码检测（澳洲/中国格式）
-- API Keys 检测
-- 密码/令牌检测
-- AWS 凭证检测
-- 私钥检测
-- 高熵字符串检测
-
-### 全局保护
-所有新 clone 的仓库自动获得 pre-commit 和 pre-push hooks 保护。
-
 ## 🚀 使用
 
 1. Clone 本仓库到本地
@@ -140,3 +119,7 @@ assert(status === 'running...');
 - 所有 hooks 放在 `openclaw/hooks/` 目录下
 - 每个 hook 是一个独立的目录，包含 `handler.ts`
 - 测试代码放在 `test/hooks/` 目录下
+
+## 🛡️ 安全
+
+查看 [SECURITY.md](SECURITY.md) 了解安全保护配置。
