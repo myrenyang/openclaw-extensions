@@ -53,7 +53,7 @@ export function calcPercentage(total: number | null, context: number | null): st
 }
 
 /**
- * Format build time to yyMMddThh:mm
+ * Format build time to yy.M.d hh:mmZ
  */
 export function formatBuildTime(isoString: string): string {
   const d = new Date(isoString);
@@ -62,7 +62,7 @@ export function formatBuildTime(isoString: string): string {
   const dd = String(d.getDate());
   const hh = String(d.getHours()).padStart(2, '0');
   const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${yy}.${MM}.${dd}T${hh}:${mm}`;
+  return `${yy}.${MM}.${dd} ${hh}:${mm}Z`;
 }
 
 /**
@@ -111,6 +111,7 @@ export function getCurrentTimeAEDT(): string {
 export function buildGatewayMessage(
   status: string,
   versionFullStr: string,
+  buildTimeStr: string,
   sessions: SessionInfo[]
 ): string {
   const startupTime = getCurrentTimeAEDT();
@@ -119,7 +120,7 @@ export function buildGatewayMessage(
 
   return `🔄 Gateway 已启动于 ${startupTime}
 
-版本：v${versionFullStr}
+版本：v${versionFullStr}${buildTimeStr}
 状态：${status}
 会话：${sessionCount} 个，最近:
 ${sessionsStr}`;
@@ -242,11 +243,12 @@ const handler = async (event: any) => {
     const versionInfo = await getVersionInfo(OC, OC_HOME);
     const sessions = await getSessions(OC);
 
-    // Build version string
+    // Build version string with build time
     const versionFullStr = versionInfo.hash ? `${versionInfo.version} (${versionInfo.hash})` : versionInfo.version;
+    const buildTimeStr = versionInfo.time ? ` at ${versionInfo.time}` : '';
 
     // Build message using pure function
-    const msg = buildGatewayMessage(status, versionFullStr, sessions);
+    const msg = buildGatewayMessage(status, versionFullStr, buildTimeStr, sessions);
 
     // Escape message for shell
     const escapedMsg = msg.replace(/"/g, '\\"');
