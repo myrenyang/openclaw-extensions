@@ -64,8 +64,9 @@ node test-handler.js
 - `getGatewayStatus()` - 获取 gateway 状态
 - `getVersionInfo()` - 获取版本信息
 - `getSessions()` - 获取会话列表
+- `getEnabledChannels()` - 获取启用的频道列表（新增）
 
-**总计：45 个测试**
+**总计：56 个测试**
 
 ---
 
@@ -88,12 +89,13 @@ assert(status === 'running...');
 
 | 类别 | 测试数 |
 |------|--------|
-| 辅助函数 | 17 |
+| 辅助函数 | 28 |
 | buildGatewayMessage | 9 |
 | getGatewayStatus | 2 |
 | getVersionInfo | 3 |
 | getSessions | 3 |
-| **总计** | **45** |
+| getEnabledChannels | 11 |
+| **总计** | **56** |
 
 ---
 
