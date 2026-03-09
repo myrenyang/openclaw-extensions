@@ -22,13 +22,18 @@
 
 ### 自定义检查
 
-**~/.git-templates/hooks/pre-commit:**
-1. 电话号码检测（澳洲/中国格式）
+**~/.git-hooks/pre-commit (全局配置):**
+1. 电话号码检测（澳洲/中国格式，仅允许特定测试号码）
 2. API Keys 检测
 3. 密码/令牌检测
 4. AWS 凭证检测
 5. 私钥检测（匹配私钥文件头）
 6. 高熵字符串检测
+
+**配置方式:**
+```bash
+git config --global core.hooksPath ~/.git-hooks
+```
 
 ---
 

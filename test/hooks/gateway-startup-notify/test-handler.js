@@ -61,7 +61,8 @@ const {
   buildGatewayMessage,
   getGatewayStatus,
   getVersionInfo,
-  getSessions
+  getSessions,
+  getEnabledChannels
 } = handler;
 
 // ============================================
@@ -263,6 +264,63 @@ async function testGetSessions() {
 }
 
 // ============================================
+// Test: getEnabledChannels (Async with Mock)
+// ============================================
+
+async function testGetEnabledChannels() {
+  console.log('\n📋 Test: getEnabledChannels (Async with Mock)');
+  console.log('=' .repeat(50));
+
+  resetMocks();
+
+  // Mock channels config response (match the exact command pattern)
+  const mockChannelsConfig = {
+    whatsapp: {
+      enabled: true,
+      dmPolicy: 'allowlist',
+      allowFrom: ['+61401234567'],
+      defaultTo: '+61401234567'
+    },
+    telegram: {
+      enabled: true,
+      dmPolicy: 'pairing',
+      allowFrom: ['+8612345678901']
+    },
+    discord: {
+      enabled: false,
+      groupPolicy: 'allowlist'
+    }
+  };
+  mockResponses['config get channels'] = JSON.stringify(mockChannelsConfig);
+
+  const channels = await getEnabledChannels('/usr/local/bin/openclaw');
+
+  // Verify only enabled channels are returned
+  assert(channels.length === 2, 'getEnabledChannels returns only enabled channels (2)');
+
+  // Verify whatsapp channel
+  const whatsapp = channels.find(c => c.name === 'whatsapp');
+  assert(whatsapp !== undefined, 'whatsapp channel is found');
+  assert(whatsapp.enabled === true, 'whatsapp enabled is true');
+  assert(whatsapp.target === '+61401234567', 'whatsapp target is from defaultTo');
+  assert(whatsapp.allowFrom.length === 1, 'whatsapp allowFrom has 1 item');
+
+  // Verify telegram channel
+  const telegram = channels.find(c => c.name === 'telegram');
+  assert(telegram !== undefined, 'telegram channel is found');
+  assert(telegram.enabled === true, 'telegram enabled is true');
+  assert(telegram.target === '+8612345678901', 'telegram target is from allowFrom[0]');
+  assert(telegram.allowFrom.length === 1, 'telegram allowFrom has 1 item');
+
+  // Verify discord is NOT included (disabled)
+  const discord = channels.find(c => c.name === 'discord');
+  assert(discord === undefined, 'discord channel is NOT included (disabled)');
+
+  // Verify exec command was called
+  assert(capturedExecCalls.some(c => c.includes('config get channels')), 'getEnabledChannels calls config get channels command');
+}
+
+// ============================================
 // Main Test Runner
 // ============================================
 
@@ -277,6 +335,7 @@ async function runAllTests() {
   await testGetGatewayStatus();
   await testGetVersionInfo();
   await testGetSessions();
+  await testGetEnabledChannels();
 
   // Summary
   console.log('\n' + '='.repeat(60));
