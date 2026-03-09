@@ -110,8 +110,8 @@ function testHelperFunctions() {
 
   // formatBuildTime (check format, not exact value due to timezone)
   const buildTimeResult = formatBuildTime('2026-03-08T08:00:00.000Z');
-  // Format: yy.M.dThh:mm or yy.MM.ddThh:mm (timezone dependent)
-  assert(buildTimeResult.match(/^\d{2}\.\d{1,2}\.\d{1,2}T\d{2}:\d{2}$/), 'formatBuildTime returns correct format (yy.M.dThh:mm)');
+  // Format: yy.M.d hh:mmZ (e.g., 26.3.8 08:00Z)
+  assert(buildTimeResult.match(/^\d{2}\.\d{1,2}\.\d{1,2} \d{2}:\d{2}Z$/), 'formatBuildTime returns correct format (yy.M.d hh:mmZ)');
 
   // formatSessionAge
   assert(formatSessionAge(300000) === '5m', 'formatSessionAge(300000) === "5m"');
@@ -178,13 +178,14 @@ function testBuildGatewayMessage() {
     { key: 'agent:main:telegram', kind: 'group', model: 'qwen3.5-plus', ageMs: 7200000, totalTokens: 20000, contextTokens: 100000 }
   ];
 
-  const msg = buildGatewayMessage('running (pid 12345)', '2026.3.2 (85377a2)', mockSessions);
+  const msg = buildGatewayMessage('running (pid 12345)', '2026.3.2 (85377a2)', ' at 26.3.3 15:36Z', mockSessions);
 
   // Verify message structure
   assert(msg.includes('🔄'), 'Message includes gateway emoji');
   assert(msg.includes('Gateway 已启动于'), 'Message includes startup header');
   assert(msg.includes('版本：v2026.3.2'), 'Message includes version');
   assert(msg.includes('85377a2'), 'Message includes build hash');
+  assert(msg.includes('at 26.3.3 15:36Z'), 'Message includes build time (new format)');
   assert(msg.includes('状态：running'), 'Message includes status');
   assert(msg.includes('会话：2 个'), 'Message includes session count');
   assert(msg.includes('5m ago'), 'Message includes session age');
