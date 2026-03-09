@@ -252,13 +252,22 @@ export async function getEnabledChannels(OC: string): Promise<DataResult<Channel
 // Handler (Entry Point)
 // ============================================
 
+/**
+ * Sleep for specified milliseconds
+ */
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const handler = async (event: any) => {
   // Only trigger on gateway startup
   if (event.type !== "gateway" || event.action !== "startup") {
     return;
   }
 
-  console.log("[gateway-startup-notify] Gateway started, gathering status...");
+  // Wait for channels to initialize (for low-resource servers)
+  console.log("[gateway-startup-notify] Gateway started, waiting 5s for channels to initialize...");
+  await sleep(5000);
+
+  console.log("[gateway-startup-notify] Gathering gateway status...");
 
   const errors: string[] = [];
   let OC = 'openclaw';
