@@ -1,0 +1,105 @@
+name: Sync main to main-low
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check if main-low branch exists
+        run: |
+          if ! git ls-remote --heads origin main-low | grep -q main-low; then
+            echo "main-low branch does not exist, creating it..."
+            git checkout -b main-low
+            git push -u origin main-low
+          else
+            echo "main-low branch exists"
+          fi
+
+      - name: Create or update sync branch
+        run: |
+          # Fetch latest branches
+          git fetch origin main:main main-low:main-low
+          
+          # Check if main is ahead of main-low
+          if git merge-base --is-ancestor main-low main; then
+            echo "main is ahead of main-low, creating sync branch"
+            
+            # Create/update sync branch
+            git checkout main
+            git checkout -B sync-main-to-main-low
+            
+            # Push the sync branch
+            git push -f origin sync-main-to-main-low
+            echo "SYNC_NEEDED=true" >> $GITHUB_ENV
+          else
+            echo "main-low is up to date with main"
+            echo "SYNC_NEEDED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check for existing PR
+        if: env.SYNC_NEEDED == 'true'
+        uses: actions/github-script@v7
+        id: check-pr
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:sync-main-to-main-low`,
+              base: 'main-low',
+              state: 'open'
+            });
+            
+            if (prs.length > 0) {
+              console.log('PR already exists:', prs[0].number);
+              core.setOutput('pr_exists', 'true');
+              core.setOutput('pr_number', prs[0].number);
+            } else {
+              console.log('No existing PR found');
+              core.setOutput('pr_exists', 'false');
+            }
+
+      - name: Create Pull Request
+        if: env.SYNC_NEEDED == 'true' && steps.check-pr.outputs.pr_exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'chore: sync main to main-low',
+              body: `## Auto-sync PR
+
+This PR automatically syncs changes from \`main\` to \`main-low\` branch.
+
+### Triggered by:
+- Push to \`main\` branch
+
+### Changes:
+See the commit history for details.
+
+---
+*This PR was created automatically by the sync-main-to-main-low workflow.*`,
+              head: 'sync-main-to-main-low',
+              base: 'main-low'
+            });
+            
+            console.log('Created PR:', pr.number);
+            console.log('PR URL:', pr.html_url);
