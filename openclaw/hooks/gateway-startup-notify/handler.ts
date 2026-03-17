@@ -30,6 +30,11 @@ export interface ChannelConfig {
   allowFrom?: string[];
 }
 
+export interface DataResult<T> {
+  data: T;
+  error?: string;
+}
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -112,18 +117,26 @@ export function buildGatewayMessage(
   status: string,
   versionFullStr: string,
   buildTimeStr: string,
-  sessions: SessionInfo[]
+  sessions: SessionInfo[],
+  errors: string[]
 ): string {
   const startupTime = getCurrentTimeAEDT();
   const sessionCount = sessions.length;
   const sessionsStr = sessions.slice(0, 5).map(formatSessionInfo).join('\n');
 
-  return `🔄 Gateway 已启动于 ${startupTime}
+  let msg = `🔄 Gateway 已启动于 ${startupTime}
 
 版本：v${versionFullStr}${buildTimeStr}
 状态：${status}
 会话：${sessionCount} 个，最近:
 ${sessionsStr}`;
+
+  // Add errors section if any
+  if (errors.length > 0) {
+    msg += '\n\n⚠️ 数据收集错误:\n' + errors.map(e => `• ${e}`).join('\n');
+  }
+
+  return msg;
 }
 
 // ============================================
@@ -133,15 +146,19 @@ ${sessionsStr}`;
 /**
  * Get gateway status from CLI
  */
-export async function getGatewayStatus(OC: string): Promise<string> {
-  const { stdout: statusRaw } = await execAsync(`${OC} gateway status 2>&1 | grep 'Runtime:' | head -1`);
-  return statusRaw.trim().replace('Runtime: ', '');
+export async function getGatewayStatus(OC: string): Promise<DataResult<string>> {
+  try {
+    const { stdout: statusRaw } = await execAsync(`${OC} gateway status 2>&1 | grep 'Runtime:' | head -1`);
+    return { data: statusRaw.trim().replace('Runtime: ', '') };
+  } catch (err) {
+    return { data: 'unknown', error: `获取状态失败：${err.message}` };
+  }
 }
 
 /**
  * Get version info from build-info.json or fallback to --version
  */
-export async function getVersionInfo(OC: string, OC_HOME: string): Promise<VersionInfo> {
+export async function getVersionInfo(OC: string, OC_HOME: string): Promise<DataResult<VersionInfo>> {
   try {
     const buildInfoPath = path.join(OC_HOME, "lib/node_modules/openclaw/dist/build-info.json");
     const { stdout: buildInfoRaw } = await execAsync(`cat "${buildInfoPath}" 2>/dev/null`);
@@ -149,9 +166,11 @@ export async function getVersionInfo(OC: string, OC_HOME: string): Promise<Versi
 
     if (buildInfo.version) {
       return {
-        version: buildInfo.version,
-        hash: buildInfo.commit ? buildInfo.commit.substring(0, 7) : '',
-        time: buildInfo.builtAt ? formatBuildTime(buildInfo.builtAt) : ''
+        data: {
+          version: buildInfo.version,
+          hash: buildInfo.commit ? buildInfo.commit.substring(0, 7) : '',
+          time: buildInfo.builtAt ? formatBuildTime(buildInfo.builtAt) : ''
+        }
       };
     }
   } catch (e) {
@@ -159,22 +178,26 @@ export async function getVersionInfo(OC: string, OC_HOME: string): Promise<Versi
     try {
       const { stdout: versionRaw } = await execAsync(`${OC} --version 2>&1`);
       const version = versionRaw.trim() || 'unknown';
-      return { version, hash: '', time: '' };
+      return { data: { version, hash: '', time: '' } };
     } catch (e2) {
-      console.log("[gateway-startup-notify] version lookup failed");
+      return { data: { version: 'unknown', hash: '', time: '' }, error: '版本查询失败' };
     }
   }
 
-  return { version: 'unknown', hash: '', time: '' };
+  return { data: { version: 'unknown', hash: '', time: '' } };
 }
 
 /**
  * Get sessions list from CLI
  */
-export async function getSessions(OC: string): Promise<SessionInfo[]> {
-  const { stdout: sessionsJsonRaw } = await execAsync(`${OC} sessions --json --all-agents 2>&1`);
-  const sessionsData = JSON.parse(sessionsJsonRaw);
-  return sessionsData.sessions || [];
+export async function getSessions(OC: string): Promise<DataResult<SessionInfo[]>> {
+  try {
+    const { stdout: sessionsJsonRaw } = await execAsync(`${OC} sessions --json --all-agents 2>&1 | grep -v "^\\[plugins\\]"`);
+    const sessionsData = JSON.parse(sessionsJsonRaw);
+    return { data: sessionsData.sessions || [] };
+  } catch (err) {
+    return { data: [], error: `获取会话失败：${err.message}` };
+  }
 }
 
 /**
@@ -192,33 +215,37 @@ export async function getOpenClawPath(): Promise<{ OC: string; OC_HOME: string }
  * Get all enabled channels from config
  * Returns array of { name, target } for each enabled channel
  */
-export async function getEnabledChannels(OC: string): Promise<ChannelConfig[]> {
-  const { stdout: channelsJsonRaw } = await execAsync(`${OC} config get channels 2>&1`);
-  const channelsData = JSON.parse(channelsJsonRaw);
+export async function getEnabledChannels(OC: string): Promise<DataResult<ChannelConfig[]>> {
+  try {
+    const { stdout: channelsJsonRaw } = await execAsync(`${OC} config get channels --json 2>&1 | grep -v "^\\[plugins\\]"`);
+    const channelsData = JSON.parse(channelsJsonRaw);
 
-  const enabledChannels: ChannelConfig[] = [];
+    const enabledChannels: ChannelConfig[] = [];
 
-  for (const [channelName, channelConfig] of Object.entries(channelsData)) {
-    const config = channelConfig as any;
-    if (config.enabled === true) {
-      // Extract target from allowFrom[0] or defaultTo
-      let target: string | undefined;
-      if (config.defaultTo) {
-        target = config.defaultTo;
-      } else if (config.allowFrom && config.allowFrom.length > 0) {
-        target = config.allowFrom[0];
+    for (const [channelName, channelConfig] of Object.entries(channelsData)) {
+      const config = channelConfig as any;
+      if (config.enabled === true) {
+        // Extract target from allowFrom[0] or defaultTo
+        let target: string | undefined;
+        if (config.defaultTo) {
+          target = config.defaultTo;
+        } else if (config.allowFrom && config.allowFrom.length > 0) {
+          target = config.allowFrom[0];
+        }
+
+        enabledChannels.push({
+          name: channelName,
+          enabled: true,
+          target,
+          allowFrom: config.allowFrom || []
+        });
       }
-
-      enabledChannels.push({
-        name: channelName,
-        enabled: true,
-        target,
-        allowFrom: config.allowFrom || []
-      });
     }
-  }
 
-  return enabledChannels;
+    return { data: enabledChannels };
+  } catch (err) {
+    return { data: [], error: `获取频道配置失败：${err.message}` };
+  }
 }
 
 // ============================================
@@ -236,54 +263,92 @@ const handler = async (event: any) => {
     return;
   }
 
-  // Wait for channels to initialize (for low-resource servers)
-  console.log("[gateway-startup-notify] Gateway started, waiting 5s for channels to initialize...");
-  await sleep(5000);
+  console.log("[gateway-startup-notify] Gateway started, gathering status...");
 
-  console.log("[gateway-startup-notify] Gathering gateway status...");
+  const errors: string[] = [];
 
   try {
     // Get OpenClaw path
-    const { OC, OC_HOME } = await getOpenClawPath();
-    console.log("[gateway-startup-notify] OC_HOME:", OC_HOME);
+    let OC = 'openclaw';
+    let OC_HOME = process.env.HOME || '';
+    try {
+      const pathResult = await getOpenClawPath();
+      OC = pathResult.OC;
+      OC_HOME = pathResult.OC_HOME;
+      console.log("[gateway-startup-notify] OC_HOME:", OC_HOME);
+    } catch (err) {
+      errors.push(`获取路径失败：${err.message}，使用默认值`);
+    }
 
-    // Fetch data
-    const status = await getGatewayStatus(OC);
-    const versionInfo = await getVersionInfo(OC, OC_HOME);
-    const sessions = await getSessions(OC);
+    // Wait for channels to initialize (for low-resource servers)
+    console.log("[gateway-startup-notify] Waiting 5s for channels to initialize...");
+    await sleep(5000);
+
+    // Fetch data (collect errors but continue)
+    const statusResult = await getGatewayStatus(OC);
+    if (statusResult.error) errors.push(statusResult.error);
+    const status = statusResult.data;
+
+    const versionResult = await getVersionInfo(OC, OC_HOME);
+    if (versionResult.error) errors.push(versionResult.error);
+    const versionInfo = versionResult.data;
+
+    const sessionsResult = await getSessions(OC);
+    if (sessionsResult.error) errors.push(sessionsResult.error);
+    const sessions = sessionsResult.data;
 
     // Build version string with build time
     const versionFullStr = versionInfo.hash ? `${versionInfo.version} (${versionInfo.hash})` : versionInfo.version;
     const buildTimeStr = versionInfo.time ? ` at ${versionInfo.time}` : '';
 
     // Build message using pure function
-    const msg = buildGatewayMessage(status, versionFullStr, buildTimeStr, sessions);
+    const msg = buildGatewayMessage(status, versionFullStr, buildTimeStr, sessions, errors);
 
     // Escape message for shell
     const escapedMsg = msg.replace(/"/g, '\\"');
 
     // Get enabled channels dynamically from config
-    const enabledChannels = await getEnabledChannels(OC);
+    const channelsResult = await getEnabledChannels(OC);
+    if (channelsResult.error) errors.push(channelsResult.error);
+    const enabledChannels = channelsResult.data;
 
     if (enabledChannels.length === 0) {
-      throw new Error("No enabled channels found in config");
+      errors.push("未找到启用的频道");
     }
 
     console.log(`[gateway-startup-notify] Sending notifications to ${enabledChannels.length} channel(s): ${enabledChannels.map(c => c.name).join(', ')}...`);
 
-    // Send messages to all enabled channels
-    const sendPromises = enabledChannels.map(channel => {
+    // Send messages to all enabled channels (don't let send errors stop the process)
+    const sendPromises = enabledChannels.map(async channel => {
       if (!channel.target) {
-        throw new Error(`No target found for channel: ${channel.name}`);
+        errors.push(`频道 ${channel.name} 没有目标地址`);
+        return;
       }
-      return execAsync(`${OC} message send --channel ${channel.name} --target ${channel.target} -m "${escapedMsg}"`);
+      try {
+        await execAsync(`${OC} message send --channel ${channel.name} --target ${channel.target} -m "${escapedMsg}"`);
+        console.log(`[gateway-startup-notify] Sent to ${channel.name}`);
+      } catch (sendErr) {
+        errors.push(`发送到 ${channel.name} 失败：${sendErr.message}`);
+      }
     });
 
     await Promise.all(sendPromises);
 
-    console.log("[gateway-startup-notify] Notifications sent successfully!");
+    if (errors.length > 0) {
+      console.log(`[gateway-startup-notify] Completed with ${errors.length} error(s):`);
+      errors.forEach(e => console.error("  -", e));
+    } else {
+      console.log("[gateway-startup-notify] Notifications sent successfully!");
+    }
   } catch (err) {
-    console.error("[gateway-startup-notify] Error:", err.message);
+    console.error("[gateway-startup-notify] Fatal error:", err.message);
+    // Try to send error notification anyway using fallback channel
+    try {
+      const fallbackMsg = `⚠️ Gateway 启动通知失败\\n\\n错误：${err.message}\\n\\n请检查日志。`;
+      await execAsync(`${OC} message send --channel telegram --target 6248047099 -m "${fallbackMsg}"`);
+    } catch (fallbackErr) {
+      console.error("[gateway-startup-notify] Fallback notification also failed:", fallbackErr.message);
+    }
   }
 };
 
