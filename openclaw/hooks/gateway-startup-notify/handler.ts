@@ -261,11 +261,11 @@ const handler = async (event: any) => {
   console.log("[gateway-startup-notify] Gateway started, gathering status...");
 
   const errors: string[] = [];
+  let OC = 'openclaw';
+  let OC_HOME = process.env.HOME || '';
 
   try {
     // Get OpenClaw path
-    let OC = 'openclaw';
-    let OC_HOME = process.env.HOME || '';
     try {
       const pathResult = await getOpenClawPath();
       OC = pathResult.OC;
