@@ -206,9 +206,10 @@ async function testGetGatewayStatus() {
   // Mock the gateway status command
   mockResponses['gateway status'] = 'Runtime: running (pid 12345, state active, sub running)';
 
-  const status = await getGatewayStatus('/usr/local/bin/openclaw');
+  const result = await getGatewayStatus('/usr/local/bin/openclaw');
 
-  assert(status === 'running (pid 12345, state active, sub running)', 'getGatewayStatus returns correct status');
+  assert(result.data === 'running (pid 12345, state active, sub running)', 'getGatewayStatus returns correct status');
+  assert(!result.error, 'getGatewayStatus returns no error');
   assert(capturedExecCalls.some(c => c.includes('gateway status')), 'getGatewayStatus calls gateway status command');
 }
 
@@ -230,12 +231,13 @@ async function testGetVersionInfo() {
   };
   mockResponses['cat'] = JSON.stringify(mockBuildInfo);
 
-  const versionInfo = await getVersionInfo('/usr/local/bin/openclaw', '/usr/local');
+  const result = await getVersionInfo('/usr/local/bin/openclaw', '/usr/local');
 
-  assert(versionInfo.version === '2026.3.2', 'getVersionInfo returns correct version');
-  assert(versionInfo.hash === '85377a2', 'getVersionInfo returns correct hash');
+  assert(result.data.version === '2026.3.2', 'getVersionInfo returns correct version');
+  assert(result.data.hash === '85377a2', 'getVersionInfo returns correct hash');
+  assert(!result.error, 'getVersionInfo returns no error');
   // Time format may vary due to timezone, just check it's non-empty
-  assert(versionInfo.time.length > 0, 'getVersionInfo returns non-empty time');
+  assert(result.data.time.length > 0, 'getVersionInfo returns non-empty time');
 }
 
 // ============================================
@@ -257,11 +259,12 @@ async function testGetSessions() {
     ]
   });
 
-  const sessions = await getSessions('/usr/local/bin/openclaw');
+  const result = await getSessions('/usr/local/bin/openclaw');
 
-  assert(sessions.length === 2, 'getSessions returns correct number of sessions');
-  assert(sessions[0].key === 'agent:main:main', 'getSessions returns correct session key');
-  assert(sessions[0].model === 'qwen3.5-plus', 'getSessions returns correct model');
+  assert(result.data.length === 2, 'getSessions returns correct number of sessions');
+  assert(!result.error, 'getSessions returns no error');
+  assert(result.data[0].key === 'agent:main:main', 'getSessions returns correct session key');
+  assert(result.data[0].model === 'qwen3.5-plus', 'getSessions returns correct model');
 }
 
 // ============================================
@@ -294,13 +297,14 @@ async function testGetEnabledChannels() {
   };
   mockResponses['config get channels'] = JSON.stringify(mockChannelsConfig);
 
-  const channels = await getEnabledChannels('/usr/local/bin/openclaw');
+  const result = await getEnabledChannels('/usr/local/bin/openclaw');
 
   // Verify only enabled channels are returned
-  assert(channels.length === 2, 'getEnabledChannels returns only enabled channels (2)');
+  assert(!result.error, 'getEnabledChannels returns no error');
+  assert(result.data.length === 2, 'getEnabledChannels returns only enabled channels (2)');
 
   // Verify whatsapp channel
-  const whatsapp = channels.find(c => c.name === 'whatsapp');
+  const whatsapp = result.data.find(c => c.name === 'whatsapp');
   assert(whatsapp !== undefined, 'whatsapp channel is found');
   assert(whatsapp.enabled === true, 'whatsapp enabled is true');
   assert(whatsapp.target === '+61401234567', 'whatsapp target is from defaultTo');
