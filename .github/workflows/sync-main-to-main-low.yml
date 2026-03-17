@@ -9,19 +9,12 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Check if sync is needed
         id: check-sync
@@ -41,43 +34,17 @@ jobs:
             echo "SYNC_NEEDED=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create rebase PR
+      - name: Create merge PR
         if: steps.check-sync.outputs.SYNC_NEEDED == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { execSync } = require('child_process');
-            
-            // Checkout main-low and create rebase branch
-            execSync('git fetch origin main-low');
-            execSync('git checkout origin/main-low');
-            
-            const branchName = `sync-rebase-${Date.now()}`;
-            execSync(`git checkout -b ${branchName}`);
-            
-            // Rebase onto main (preserves main-low commits)
-            console.log('Rebasing onto main...');
-            execSync('git fetch origin main');
-            try {
-              execSync('git rebase origin/main', { stdio: 'pipe' });
-            } catch (err) {
-              console.error('Rebase failed:', err.message);
-              // Auto-resolve conflicts by taking main's version
-              execSync('git rebase --abort || true');
-              execSync('git reset --hard origin/main');
-              console.log('Falling back to reset --hard');
-            }
-            
-            // Push the rebase branch
-            execSync(`git push origin ${branchName}`);
-            console.log('Pushed branch:', branchName);
-            
-            // Check for existing PR
+            // Check for existing open PRs
             const { data: existingPRs } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              head: `${context.repo.owner}:${branchName}`,
+              head: `${context.repo.owner}:main`,
               base: 'main-low',
               state: 'open'
             });
@@ -87,24 +54,25 @@ jobs:
               return;
             }
             
-            // Create PR
+            // Create merge PR (main -> main-low)
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: 'chore: rebase main-low onto main',
+              title: 'chore: merge main into main-low',
               body: [
                 '## Auto-sync PR',
                 '',
-                'This PR rebases `main-low` onto `main` to sync changes.',
+                'This PR merges latest changes from `main` into `main-low`.',
                 '',
                 '### What this does:',
-                '- Preserves all commits unique to `main-low`',
-                '- Replays them on top of latest `main`',
+                '- Merges all new commits from `main`',
+                '- **Preserves all commits unique to `main-low`**',
+                '- Creates a merge commit',
                 '',
                 '### Merge instructions:',
                 '1. Review the changes',
-                '2. Use "Rebase and merge" (not squash)',
-                '3. This preserves main-low commit history',
+                '2. Use **"Create a merge commit"** (NOT squash or rebase)',
+                '3. This preserves main-low history and adds main commits',
                 '',
                 '### Triggered by:',
                 '- Push to `main` branch',
@@ -112,7 +80,7 @@ jobs:
                 '---',
                 '*This PR was created automatically by the sync-main-to-main-low workflow.*'
               ].join('\n'),
-              head: branchName,
+              head: 'main',
               base: 'main-low'
             });
             
