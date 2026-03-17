@@ -178,7 +178,7 @@ function testBuildGatewayMessage() {
     { key: 'agent:main:telegram', kind: 'group', model: 'qwen3.5-plus', ageMs: 7200000, totalTokens: 20000, contextTokens: 100000 }
   ];
 
-  const msg = buildGatewayMessage('running (pid 12345)', '2026.3.2 (85377a2)', ' at 26.3.3 15:36Z', mockSessions);
+  const msg = buildGatewayMessage('running (pid 12345)', '2026.3.2 (85377a2)', ' at 26.3.3 15:36Z', mockSessions, []);
 
   // Verify message structure
   assert(msg.includes('🔄'), 'Message includes gateway emoji');
@@ -191,6 +191,13 @@ function testBuildGatewayMessage() {
   assert(msg.includes('5m ago'), 'Message includes session age');
   assert(msg.includes('50k'), 'Message includes token count');
   assert(msg.includes('AEDT'), 'Message includes timezone');
+
+  // Test with errors
+  const msgWithErrors = buildGatewayMessage('running', '2026.3.2', '', [], ['Error 1', 'Error 2']);
+  assert(msgWithErrors.includes('⚠️'), 'Message with errors includes warning emoji');
+  assert(msgWithErrors.includes('数据收集错误'), 'Message with errors includes errors header');
+  assert(msgWithErrors.includes('Error 1'), 'Message with errors includes first error');
+  assert(msgWithErrors.includes('Error 2'), 'Message with errors includes second error');
 }
 
 // ============================================
