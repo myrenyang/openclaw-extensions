@@ -8,6 +8,9 @@ on:
 jobs:
   create-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +25,8 @@ jobs:
 
       - name: Check if main-low branch exists
         run: |
-          if ! git ls-remote --heads origin main-low | grep -q main-low; then
+          git fetch origin
+          if ! git branch -r | grep -q origin/main-low; then
             echo "main-low branch does not exist, creating it..."
             git checkout -b main-low
             git push -u origin main-low
@@ -30,57 +34,39 @@ jobs:
             echo "main-low branch exists"
           fi
 
-      - name: Create or update sync branch
+      - name: Check if sync is needed
+        id: check-sync
         run: |
-          # Fetch latest branches
-          git fetch origin main:main main-low:main-low
+          git fetch origin main main-low
           
           # Check if main is ahead of main-low
-          if git merge-base --is-ancestor main-low main; then
-            echo "main is ahead of main-low, creating sync branch"
-            
-            # Create/update sync branch
-            git checkout main
-            git checkout -B sync-main-to-main-low
-            
-            # Push the sync branch
-            git push -f origin sync-main-to-main-low
-            echo "SYNC_NEEDED=true" >> $GITHUB_ENV
+          if git merge-base --is-ancestor origin/main-low origin/main; then
+            echo "main is ahead of main-low, sync needed"
+            echo "SYNC_NEEDED=true" >> $GITHUB_OUTPUT
           else
             echo "main-low is up to date with main"
-            echo "SYNC_NEEDED=false" >> $GITHUB_ENV
+            echo "SYNC_NEEDED=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check for existing PR
-        if: env.SYNC_NEEDED == 'true'
+      - name: Create sync branch and PR
+        if: steps.check-sync.outputs.SYNC_NEEDED == 'true'
         uses: actions/github-script@v7
-        id: check-pr
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: `${context.repo.owner}:sync-main-to-main-low`,
-              base: 'main-low',
-              state: 'open'
-            });
+            const { execSync } = require('child_process');
             
-            if (prs.length > 0) {
-              console.log('PR already exists:', prs[0].number);
-              core.setOutput('pr_exists', 'true');
-              core.setOutput('pr_number', prs[0].number);
-            } else {
-              console.log('No existing PR found');
-              core.setOutput('pr_exists', 'false');
-            }
-
-      - name: Create Pull Request
-        if: env.SYNC_NEEDED == 'true' && steps.check-pr.outputs.pr_exists == 'false'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
+            // Checkout main and create sync branch
+            execSync('git fetch origin main');
+            execSync('git checkout origin/main');
+            
+            const branchName = `sync-main-to-main-low-${Date.now()}`;
+            execSync(`git checkout -b ${branchName}`);
+            execSync(`git push origin ${branchName}`);
+            
+            console.log('Created branch:', branchName);
+            
+            // Create PR
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -99,7 +85,7 @@ jobs:
                 '---',
                 '*This PR was created automatically by the sync-main-to-main-low workflow.*'
               ].join('\n'),
-              head: 'sync-main-to-main-low',
+              head: branchName,
               base: 'main-low'
             });
             
