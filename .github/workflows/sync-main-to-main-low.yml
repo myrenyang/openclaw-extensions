@@ -85,18 +85,20 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: 'chore: sync main to main-low',
-              body: `## Auto-sync PR
-
-This PR automatically syncs changes from \`main\` to \`main-low\` branch.
-
-### Triggered by:
-- Push to \`main\` branch
-
-### Changes:
-See the commit history for details.
-
----
-*This PR was created automatically by the sync-main-to-main-low workflow.*`,
+              body: [
+                '## Auto-sync PR',
+                '',
+                'This PR automatically syncs changes from `main` to `main-low` branch.',
+                '',
+                '### Triggered by:',
+                '- Push to `main` branch',
+                '',
+                '### Changes:',
+                'See the commit history for details.',
+                '',
+                '---',
+                '*This PR was created automatically by the sync-main-to-main-low workflow.*'
+              ].join('\n'),
               head: 'sync-main-to-main-low',
               base: 'main-low'
             });
