@@ -9,12 +9,18 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Check if sync is needed
         id: check-sync
@@ -34,55 +40,43 @@ jobs:
             echo "SYNC_NEEDED=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create merge PR
+      - name: Rebase main-low onto main
         if: steps.check-sync.outputs.SYNC_NEEDED == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // Check for existing open PRs
-            const { data: existingPRs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: `${context.repo.owner}:main`,
-              base: 'main-low',
-              state: 'open'
-            });
+        run: |
+          git fetch origin main-low
+          
+          # Get list of commits unique to main-low (not in main)
+          echo "Finding main-low specific commits..."
+          MAIN_LOW_COMMITS=$(git rev-list origin/main..origin/main-low)
+          
+          if [ -z "$MAIN_LOW_COMMITS" ]; then
+            echo "No main-low specific commits found, just reset to main"
+            git checkout -b main-low origin/main
+            git push -f origin main-low
+          else
+            echo "Found main-low specific commits:"
+            echo "$MAIN_LOW_COMMITS"
             
-            if (existingPRs.length > 0) {
-              console.log('PR already exists:', existingPRs[0].number);
-              return;
-            }
+            # Checkout main
+            git checkout origin/main
             
-            // Create merge PR (main -> main-low)
-            const { data: pr } = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'chore: merge main into main-low',
-              body: [
-                '## Auto-sync PR',
-                '',
-                'This PR merges latest changes from `main` into `main-low`.',
-                '',
-                '### What this does:',
-                '- Merges all new commits from `main`',
-                '- **Preserves all commits unique to `main-low`**',
-                '- Creates a merge commit',
-                '',
-                '### Merge instructions:',
-                '1. Review the changes',
-                '2. Use **"Create a merge commit"** (NOT squash or rebase)',
-                '3. This preserves main-low history and adds main commits',
-                '',
-                '### Triggered by:',
-                '- Push to `main` branch',
-                '',
-                '---',
-                '*This PR was created automatically by the sync-main-to-main-low workflow.*'
-              ].join('\n'),
-              head: 'main',
-              base: 'main-low'
-            });
+            # Create new branch from main
+            git checkout -b main-low-sync
             
-            console.log('Created PR:', pr.number);
-            console.log('PR URL:', pr.html_url);
+            # Cherry-pick main-low specific commits (in order)
+            for commit in $(echo "$MAIN_LOW_COMMITS" | tac); do
+              echo "Cherry-picking $commit..."
+              git cherry-pick $commit || {
+                echo "Conflict detected, aborting..."
+                git cherry-pick --abort
+                echo "Falling back to reset --hard"
+                git reset --hard origin/main
+                break
+              }
+            done
+            
+            # Force push to main-low
+            git push -f origin main-low-sync:main-low
+          fi
+          
+          echo "✅ main-low synced with main, preserving it-bot specific commits"
