@@ -39,9 +39,17 @@ jobs:
         run: |
           git fetch origin main main-low
           
-          # Check if main is ahead of main-low
-          if git merge-base --is-ancestor origin/main-low origin/main; then
-            echo "main is ahead of main-low, sync needed"
+          # Count commits: main-low...main (left = main-low only, right = main only)
+          COUNTS=$(git rev-list --left-right --count origin/main-low...origin/main)
+          MAIN_LOW_ONLY=$(echo $COUNTS | cut -d' ' -f1)
+          MAIN_ONLY=$(echo $COUNTS | cut -d' ' -f2)
+          
+          echo "main-low only: $MAIN_LOW_ONLY commits"
+          echo "main only: $MAIN_ONLY commits"
+          
+          # Sync needed if main has commits not in main-low
+          if [ "$MAIN_ONLY" -gt 0 ]; then
+            echo "main has $MAIN_ONLY commits not in main-low, sync needed"
             echo "SYNC_NEEDED=true" >> $GITHUB_OUTPUT
           else
             echo "main-low is up to date with main"
