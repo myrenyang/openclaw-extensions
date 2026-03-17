@@ -9,7 +9,7 @@ jobs:
   create-pr:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
 
     steps:
@@ -64,13 +64,33 @@ jobs:
           script: |
             const { execSync } = require('child_process');
             
-            // Checkout main and create sync branch
+            // Get latest main commit SHA
             execSync('git fetch origin main');
-            execSync('git checkout origin/main');
+            const mainSha = execSync('git rev-parse origin/main').toString().trim();
             
+            console.log('Main SHA:', mainSha);
+            
+            // Create branch using GitHub API
             const branchName = `sync-main-to-main-low-${Date.now()}`;
-            execSync(`git checkout -b ${branchName}`);
-            execSync(`git push origin ${branchName}`);
+            
+            try {
+              // Try to delete branch if it exists (cleanup)
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branchName}`
+              }).catch(() => {});
+            } catch (e) {
+              // Ignore if branch doesn't exist
+            }
+            
+            // Create new branch from main
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/heads/${branchName}`,
+              sha: mainSha
+            });
             
             console.log('Created branch:', branchName);
             
