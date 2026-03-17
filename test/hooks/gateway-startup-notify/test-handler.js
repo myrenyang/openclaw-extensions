@@ -318,14 +318,14 @@ async function testGetEnabledChannels() {
   assert(whatsapp.allowFrom.length === 1, 'whatsapp allowFrom has 1 item');
 
   // Verify telegram channel
-  const telegram = channels.find(c => c.name === 'telegram');
+  const telegram = result.data.find(c => c.name === 'telegram');
   assert(telegram !== undefined, 'telegram channel is found');
   assert(telegram.enabled === true, 'telegram enabled is true');
   assert(telegram.target === '+8612345678901', 'telegram target is from allowFrom[0]');
   assert(telegram.allowFrom.length === 1, 'telegram allowFrom has 1 item');
 
   // Verify discord is NOT included (disabled)
-  const discord = channels.find(c => c.name === 'discord');
+  const discord = result.data.find(c => c.name === 'discord');
   assert(discord === undefined, 'discord channel is NOT included (disabled)');
 
   // Verify exec command was called
